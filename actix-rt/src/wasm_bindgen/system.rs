@@ -30,10 +30,6 @@ pub struct System {
 
 impl System {
     pub fn new() -> SystemRunner {
-        if CURRENT.with(|cell| cell.borrow().is_some()) {
-            panic!("System is already running");
-        }
-
         SystemRunner
     }
 

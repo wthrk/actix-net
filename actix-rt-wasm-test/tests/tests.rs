@@ -4,11 +4,9 @@ use std::{
 };
 
 use actix_rt::{Arbiter, System};
-use {
-    std::{sync::mpsc::channel, thread},
-    tokio::sync::oneshot,
-};
+use tokio::sync::{mpsc, oneshot};
 
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -97,24 +95,26 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 //
 // // Temporary disabled tests for io-uring feature.
 // // They should be enabled when possible.
-//
-// #[cfg(not(feature = "io-uring"))]
-// #[test]
-// fn arbiter_spawn_fn_runs() {
-//     let _ = System::new();
-//
-//     let (tx, rx) = channel::<u32>();
-//
-//     let arbiter = Arbiter::new();
-//     arbiter.spawn_fn(move || tx.send(42).unwrap());
-//
-//     let num = rx.recv().unwrap();
-//     assert_eq!(num, 42);
-//
-//     arbiter.stop();
-//     arbiter.join().unwrap();
-// }
-//
+
+#[test]
+async fn arbiter_spawn_fn_runs() {
+    // let _ = System::new();
+
+    assert_eq!(1, 1);
+
+    let (tx, mut rx) = mpsc::channel::<u32>(1);
+
+    let arbiter = Arbiter::new();
+    arbiter.spawn(async move { tx.send(42).await.unwrap() });
+
+    let num = rx.recv().await.unwrap();
+
+    assert_eq!(num, 42);
+
+    arbiter.stop();
+    arbiter.join_async().await.unwrap();
+}
+
 // #[cfg(not(feature = "io-uring"))]
 // #[test]
 // fn arbiter_handle_spawn_fn_runs() {

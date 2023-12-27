@@ -29,6 +29,14 @@ pub struct System {
 }
 
 impl System {
+    pub fn new() -> SystemRunner {
+        if CURRENT.with(|cell| cell.borrow().is_some()) {
+            panic!("System is already running");
+        }
+
+        SystemRunner
+    }
+
     /// Constructs new system and registers it on the current thread.
     pub(crate) fn construct(arbiter_handle: ArbiterHandle) {
         let sys = System {
@@ -101,3 +109,19 @@ impl System {
 
 pub struct SystemRunner;
 pub struct SystemCommand;
+
+impl SystemRunner {
+    /// なんとなく他のと似た API にしてみる
+    pub async fn block_on<F: Future>(&self, fut: F) -> F::Output {
+        self.run();
+        let result = fut.await;
+        result
+    }
+
+    /// Run the system.
+    pub fn run(&self) {
+        if Arbiter::try_current().is_none() {
+            let _ = Arbiter::new();
+        }
+    }
+}

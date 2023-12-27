@@ -17,6 +17,7 @@ use crate::system::{System, SystemCommand};
 
 pub(crate) static COUNT: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
 thread_local!(
     static HANDLE: RefCell<Option<ArbiterHandle>> = const { RefCell::new(None) };
 );
@@ -130,7 +131,7 @@ impl Arbiter {
 
             // System::set_current(sys);
 
-            HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
+            // HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
 
             // register arbiter
             // let _ = System::current()
@@ -280,11 +281,18 @@ impl Arbiter {
     ///
     /// # Panics
     /// Panics if no Arbiter is running on the current thread.
+    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     pub fn current() -> ArbiterHandle {
         HANDLE.with(|cell| match *cell.borrow() {
             Some(ref hnd) => hnd.clone(),
             None => panic!("Arbiter is not running."),
         })
+    }
+    
+    /// wasm では スレッドに Arbiter が一つだけとは限らない
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    pub fn current() -> ArbiterHandle {
+        unreachable!()
     }
 
     /// Try to get current running arbiter handle.
@@ -292,8 +300,15 @@ impl Arbiter {
     /// Returns `None` if no Arbiter has been started.
     ///
     /// Unlike [`current`](Self::current), this never panics.
+    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     pub fn try_current() -> Option<ArbiterHandle> {
         HANDLE.with(|cell| cell.borrow().clone())
+    }
+
+    /// wasm では スレッドに Arbiter が一つだけとは限らない
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    pub fn try_current() -> Option<ArbiterHandle> {
+        unreachable!()
     }
 
     /// Stop Arbiter from continuing it's event loop.

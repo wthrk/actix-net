@@ -50,6 +50,12 @@
 #[cfg(all(not(target_os = "linux"), feature = "io-uring"))]
 compile_error!("io_uring is a linux only feature.");
 
+#[cfg(all(not(target_family = "wasm"), feature = "rt-wasm-bindgen"))]
+compile_error!("rt-wasm-bindgen is a wasm32-unknown-unknown only feature.");
+
+#[cfg(all(feature = "rt-tokio", feature = "rt-wasm-bindgen"))]
+compile_error!("rt-tokio and rt-wasm-bindgen cannot be specified at the same time.");
+
 use std::future::Future;
 
 // Cannot define a main macro when compiled into test harness.
@@ -59,19 +65,38 @@ pub use actix_macros::main;
 #[cfg(feature = "macros")]
 pub use actix_macros::test;
 
+pub use tokio::pin;
+
+#[cfg(feature = "rt-tokio")]
+use tokio::task::JoinHandle;
+
+#[cfg(not(feature = "rt-tokio"))]
+struct JoinHandle<T>(std::marker::PhantomData<T>);
+
 mod arbiter;
-mod runtime;
 mod system;
 
-pub use tokio::pin;
-use tokio::task::JoinHandle;
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
+mod runtime;
+
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+mod wb_runtime;
 
 pub use self::{
     arbiter::{Arbiter, ArbiterHandle},
-    runtime::Runtime,
     system::{System, SystemRunner},
 };
 
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
+pub use runtime::Runtime;
+
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+pub use wb_runtime::Runtime;
+
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+use wb_runtime as runtime;
+
+#[cfg(feature = "rt-tokio")]
 pub mod signal {
     //! Asynchronous signal handling (Tokio re-exports).
 
@@ -83,6 +108,7 @@ pub mod signal {
     pub use tokio::signal::ctrl_c;
 }
 
+#[cfg(feature = "rt-tokio")]
 pub mod net {
     //! TCP/UDP/Unix bindings (mostly Tokio re-exports).
 
@@ -154,6 +180,7 @@ pub mod net {
     }
 }
 
+#[cfg(feature = "rt-tokio")]
 pub mod time {
     //! Utilities for tracking time (Tokio re-exports).
 
@@ -162,6 +189,17 @@ pub mod time {
     };
 }
 
+//#[cfg(not(feature = "rt-tokio"))]
+//pub mod time {
+//    //! Utilities for tracking time (Tokio re-exports).
+//
+//    pub use instant::Instant;
+//    pub use wasmtimer::tokio::{
+//        interval, interval_at, sleep, sleep_until, timeout, Interval, Sleep, Timeout,
+//    };
+//}
+
+#[cfg(feature = "rt-tokio")]
 pub mod task {
     //! Task management (Tokio re-exports).
 
@@ -200,10 +238,20 @@ pub mod task {
 /// ```
 #[track_caller]
 #[inline]
+#[cfg(feature = "rt-tokio")]
 pub fn spawn<Fut>(f: Fut) -> JoinHandle<Fut::Output>
 where
     Fut: Future + 'static,
     Fut::Output: 'static,
 {
     tokio::task::spawn_local(f)
+}
+
+#[cfg(not(feature = "rt-tokio"))]
+pub fn spawn<Fut>(f: Fut) -> JoinHandle<Fut::Output>
+where
+    Fut: Future + 'static,
+    Fut::Output: 'static,
+{
+    unreachable!()
 }

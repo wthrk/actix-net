@@ -5,8 +5,10 @@ use std::{
     pin::Pin,
     sync::atomic::{AtomicUsize, Ordering},
     task::{Context, Poll},
-    thread,
 };
+
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
+use std::thread;
 
 use futures_core::ready;
 use tokio::sync::mpsc;
@@ -87,6 +89,8 @@ impl ArbiterHandle {
 #[derive(Debug)]
 pub struct Arbiter {
     tx: mpsc::UnboundedSender<ArbiterCommand>,
+
+    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     thread_handle: thread::JoinHandle<()>,
 }
 
@@ -95,6 +99,7 @@ impl Arbiter {
     ///
     /// # Panics
     /// Panics if a [System] is not registered on the current thread.
+    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     #[cfg(not(all(target_os = "linux", feature = "io-uring")))]
     #[allow(clippy::new_without_default)]
     pub fn new() -> Arbiter {
@@ -103,10 +108,51 @@ impl Arbiter {
         })
     }
 
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Arbiter {
+        let sys = System::current();
+        let system_id = sys.id();
+        let arb_id = COUNT.fetch_add(1, Ordering::Relaxed);
+
+        let name = format!("actix-rt|system:{}|arbiter:{}", system_id, arb_id);
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+
+        wasm_bindgen_futures::spawn_local({
+            let tx = tx.clone();
+            let hnd = ArbiterHandle::new(tx);
+
+            System::set_current(sys);
+
+            HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
+
+            // register arbiter
+            let _ = System::current()
+                .tx()
+                .send(SystemCommand::RegisterArbiter(arb_id, hnd));
+
+            ready_tx.send(()).unwrap();
+
+            // run arbiter event processing loop
+            let runner = ArbiterRunner { rx, arb_id };
+
+            runner
+        });
+
+        Arbiter { tx }
+    }
+
     /// Spawn a new Arbiter using the [Tokio Runtime](tokio-runtime) returned from a closure.
     ///
     /// [tokio-runtime]: tokio::runtime::Runtime
-    #[cfg(not(all(target_os = "linux", feature = "io-uring")))]
+    #[cfg(all(
+        feature = "rt-tokio",
+        not(target_os = "linux"),
+        not(feature = "io-uring"),
+        not(feature = "rt-wasm-bindgen")
+    ))]
     pub fn with_tokio_rt<F>(runtime_factory: F) -> Arbiter
     where
         F: Fn() -> tokio::runtime::Runtime + Send + 'static,
@@ -159,7 +205,7 @@ impl Arbiter {
     ///
     /// # Panics
     /// Panics if a [System] is not registered on the current thread.
-    #[cfg(all(target_os = "linux", feature = "io-uring"))]
+    #[cfg(all(target_os = "linux", feature = "io-uring", feature = "rt-tokio"))]
     #[allow(clippy::new_without_default)]
     pub fn new() -> Arbiter {
         let sys = System::current();
@@ -206,6 +252,7 @@ impl Arbiter {
     }
 
     /// Sets up an Arbiter runner in a new System using the environment's local set.
+    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     pub(crate) fn in_new_system() -> ArbiterHandle {
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -282,6 +329,7 @@ impl Arbiter {
     /// Wait for Arbiter's event loop to complete.
     ///
     /// Joins the underlying OS thread handle. See [`JoinHandle::join`](thread::JoinHandle::join).
+    #[cfg(feature = "rt-tokio")]
     pub fn join(self) -> thread::Result<()> {
         self.thread_handle.join()
     }
@@ -290,22 +338,26 @@ impl Arbiter {
 /// A persistent future that processes [Arbiter] commands.
 struct ArbiterRunner {
     rx: mpsc::UnboundedReceiver<ArbiterCommand>,
+
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    arb_id: usize,
 }
 
 impl Future for ArbiterRunner {
     type Output = ();
 
+    #[cfg(not(feature = "rt-wasm-bindgen"))]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // process all items currently buffered in channel
         loop {
             match ready!(self.rx.poll_recv(cx)) {
                 // channel closed; no more messages can be received
-                None => return Poll::Ready(()),
+                None => break,
 
                 // process arbiter command
                 Some(item) => match item {
                     ArbiterCommand::Stop => {
-                        return Poll::Ready(());
+                        break;
                     }
                     ArbiterCommand::Execute(task_fut) => {
                         tokio::task::spawn_local(task_fut);
@@ -313,5 +365,35 @@ impl Future for ArbiterRunner {
                 },
             }
         }
+
+        Poll::Ready(())
+    }
+
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // process all items currently buffered in channel
+        loop {
+            match ready!(self.rx.poll_recv(cx)) {
+                // channel closed; no more messages can be received
+                None => break,
+
+                // process arbiter command
+                Some(item) => match item {
+                    ArbiterCommand::Stop => {
+                        break;
+                    }
+                    ArbiterCommand::Execute(task_fut) => {
+                        wasm_bindgen_futures::spawn_local(task_fut);
+                    }
+                },
+            }
+        }
+
+        // deregister arbiter
+        let _ = System::current()
+            .tx()
+            .send(SystemCommand::DeregisterArbiter(self.arb_id));
+
+        Poll::Ready(())
     }
 }

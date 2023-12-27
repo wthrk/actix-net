@@ -3,6 +3,7 @@ members = [
   "actix-codec",
   "actix-macros",
   "actix-rt",
+  "actix-rt-wasm-test",
   "actix-server",
   "actix-service",
   "actix-tls",
@@ -23,6 +24,7 @@ rust-version = "1.65"
 actix-codec = { path = "actix-codec" }
 actix-macros = { path = "actix-macros" }
 actix-rt = { path = "actix-rt" }
+actix-rt-wasm-test = { path = "actix-rt-wasm-test" }
 actix-server = { path = "actix-server" }
 actix-service = { path = "actix-service" }
 actix-tls = { path = "actix-tls" }

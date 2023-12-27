@@ -21,15 +21,20 @@ allowed_external_types = [
 ]
 
 [features]
-default = ["macros"]
+default = ["macros", "rt-tokio"]
 macros = ["actix-macros"]
-io-uring = ["tokio-uring"]
+rt-tokio = [
+ "tokio/rt", "tokio/net", "tokio/parking_lot", "tokio/signal", "tokio/time"
+]
+io-uring = ["rt-tokio", "tokio-uring"]
+rt-wasm-bindgen = ["wasm-bindgen", "wasm-bindgen-futures", "tokio"]
 
 [dependencies]
 actix-macros = { version = "0.2.3", optional = true }
-
 futures-core = { version = "0.3", default-features = false }
-tokio = { version = "1.23.1", features = ["rt", "net", "parking_lot", "signal", "sync", "time"] }
+tokio = { version = "1.23.1", features = ["macros", "sync"], optional = true, default-features = false }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 
 # runtime for `io-uring` feature
 [target.'cfg(target_os = "linux")'.dependencies]

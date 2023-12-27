@@ -17,7 +17,6 @@ use crate::system::{System, SystemCommand};
 
 pub(crate) static COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
 thread_local!(
     static HANDLE: RefCell<Option<ArbiterHandle>> = const { RefCell::new(None) };
 );
@@ -112,41 +111,30 @@ impl Arbiter {
         })
     }
 
+    /// wasm シングルスレッド版では Arbiter は高々ひとつしか起動できない。
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
     #[allow(clippy::new_without_default)]
     pub fn new() -> Arbiter {
-        //let sys = System::current();
-        //let system_id = sys.id();
-        let arb_id = COUNT.fetch_add(1, Ordering::Relaxed);
+        if Self::try_current().is_some() {
+            panic!("Cannot create new Arbiter: Arbiter is already running.");
+        }
 
-        //let name = format!("actix-rt|system:{}|arbiter:{}", system_id, arb_id);
+        let arb_id = COUNT.fetch_add(1, Ordering::Relaxed);
         let name = format!("actix-rt|arbiter:{}", arb_id);
         let (tx, rx) = mpsc::unbounded_channel();
-
         let (join_tx, join_rx) = oneshot::channel();
 
-        wasm_bindgen_futures::spawn_local({
-            let tx = tx.clone();
-            let hnd = ArbiterHandle::new(tx);
+        let hnd = ArbiterHandle::new(tx.clone());
+        HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
+        System::construct(hnd.clone());
 
-            // System::set_current(sys);
-
-            // HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
-
-            // register arbiter
-            // let _ = System::current()
-            //     .tx()
-            //     .send(SystemCommand::RegisterArbiter(arb_id, hnd));
-
-            // run arbiter event processing loop
-            let runner = ArbiterRunner {
-                rx,
-                join_tx: Some(join_tx),
-                arb_id,
-            };
-
-            runner
-        });
+        // run arbiter event processing loop
+        let runner = ArbiterRunner {
+            rx,
+            join_tx: Some(join_tx),
+            arb_id,
+        };
+        wasm_bindgen_futures::spawn_local(runner);
 
         Arbiter { tx, join_rx }
     }
@@ -281,18 +269,11 @@ impl Arbiter {
     ///
     /// # Panics
     /// Panics if no Arbiter is running on the current thread.
-    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     pub fn current() -> ArbiterHandle {
         HANDLE.with(|cell| match *cell.borrow() {
             Some(ref hnd) => hnd.clone(),
             None => panic!("Arbiter is not running."),
         })
-    }
-    
-    /// wasm では スレッドに Arbiter が一つだけとは限らない
-    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-    pub fn current() -> ArbiterHandle {
-        unreachable!()
     }
 
     /// Try to get current running arbiter handle.
@@ -300,15 +281,8 @@ impl Arbiter {
     /// Returns `None` if no Arbiter has been started.
     ///
     /// Unlike [`current`](Self::current), this never panics.
-    #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     pub fn try_current() -> Option<ArbiterHandle> {
         HANDLE.with(|cell| cell.borrow().clone())
-    }
-
-    /// wasm では スレッドに Arbiter が一つだけとは限らない
-    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-    pub fn try_current() -> Option<ArbiterHandle> {
-        unreachable!()
     }
 
     /// Stop Arbiter from continuing it's event loop.
@@ -418,13 +392,9 @@ impl Future for ArbiterRunner {
             }
         }
 
-        // deregister arbiter
-        // let _ = System::current()
-        //     .tx()
-        //     .send(SystemCommand::DeregisterArbiter(self.arb_id));
-
         if let Some(tx) = self.join_tx.take() {
             wasm_bindgen_futures::spawn_local(async move {
+                HANDLE.with(|cell| *cell.borrow_mut() = None);
                 tx.send(()).unwrap();
             });
         }

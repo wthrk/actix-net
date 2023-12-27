@@ -29,11 +29,7 @@ pub struct System {
     arbiter_handle: ArbiterHandle,
 }
 
-#[cfg(all(
-    feature = "rt-tokio",
-    not(feature = "io-uring"),
-    not(feature = "rt-wasm-bindgen")
-))]
+#[cfg(not(feature = "io-uring"))]
 impl System {
     /// Create a new system.
     ///
@@ -74,10 +70,7 @@ impl System {
     }
 }
 
-#[cfg(any(
-    feature = "rt-wasm-bindgen",
-    all(feature = "io-uring", feature = "rt-tokio")
-))]
+#[cfg(feature = "io-uring")]
 impl System {
     /// Create a new system.
     ///
@@ -88,16 +81,16 @@ impl System {
         SystemRunner
     }
 
-    ///// Create a new System using the [Tokio Runtime](tokio-runtime) returned from a closure.
-    /////
-    ///// [tokio-runtime]: tokio::runtime::Runtime
-    //#[doc(hidden)]
-    //pub fn with_tokio_rt<F>(_: F) -> SystemRunner
-    //where
-    //    F: Fn() -> tokio::runtime::Runtime,
-    //{
-    //    unimplemented!("System::with_tokio_rt is not implemented for io-uring feature yet")
-    //}
+    /// Create a new System using the [Tokio Runtime](tokio-runtime) returned from a closure.
+    ///
+    /// [tokio-runtime]: tokio::runtime::Runtime
+    #[doc(hidden)]
+    pub fn with_tokio_rt<F>(_: F) -> SystemRunner
+    where
+        F: Fn() -> tokio::runtime::Runtime,
+    {
+        unimplemented!("System::with_tokio_rt is not implemented for io-uring feature yet")
+    }
 }
 
 impl System {
@@ -178,11 +171,7 @@ impl System {
 }
 
 /// Runner that keeps a [System]'s event loop alive until stop message is received.
-#[cfg(all(
-    feature = "rt-tokio",
-    not(feature = "io-uring"),
-    not(feature = "rt-wasm-bindgen")
-))]
+#[cfg(not(feature = "io-uring"))]
 #[must_use = "A SystemRunner does nothing unless `run` is called."]
 #[derive(Debug)]
 pub struct SystemRunner {
@@ -190,11 +179,7 @@ pub struct SystemRunner {
     stop_rx: oneshot::Receiver<i32>,
 }
 
-#[cfg(all(
-    feature = "tokio",
-    not(feature = "io-uring"),
-    not(feature = "rt-wasm-bindgen")
-))]
+#[cfg(not(feature = "io-uring"))]
 impl SystemRunner {
     /// Starts event loop and will return once [System] is [stopped](System::stop).
     pub fn run(self) -> io::Result<()> {
@@ -261,15 +246,12 @@ impl SystemRunner {
 }
 
 /// Runner that keeps a [System]'s event loop alive until stop message is received.
-#[cfg(any(
-    feature = "rt-wasm-bindgen",
-    all(feature = "io-uring", feature = "rt-tokio")
-))]
+#[cfg(feature = "io-uring")]
 #[must_use = "A SystemRunner does nothing unless `run` is called."]
 #[derive(Debug)]
 pub struct SystemRunner;
 
-#[cfg(all(feature = "io-uring", feature = "rt-tokio"))]
+#[cfg(feature = "io-uring")]
 impl SystemRunner {
     /// Starts event loop and will return once [System] is [stopped](System::stop).
     pub fn run(self) -> io::Result<()> {
@@ -304,24 +286,6 @@ impl SystemRunner {
             drop(stop_rx);
             res
         })
-    }
-}
-
-#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-impl SystemRunner {
-    /// Starts event loop and will return once [System] is [stopped](System::stop).
-    pub fn run(self) -> io::Result<()> {
-        unimplemented!("SystemRunner::run is not implemented for io-uring feature yet");
-    }
-
-    /// Runs the event loop until [stopped](System::stop_with_code), returning the exit code.
-    pub fn run_with_code(self) -> io::Result<i32> {
-        unimplemented!("SystemRunner::run_with_code is not implemented for io-uring feature yet");
-    }
-
-    /// Runs the provided future, blocking the current thread until the future completes.
-    pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        unimplemented!();
     }
 }
 

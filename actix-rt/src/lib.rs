@@ -74,24 +74,24 @@ pub use tokio::task::JoinHandle;
 pub struct JoinHandle<T>(std::marker::PhantomData<T>);
 
 mod arbiter;
-mod system;
 
 #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
 mod runtime;
 
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
+mod system;
+
 #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-mod wb_runtime;
+mod wasm_bindgen;
+
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+pub use crate::wasm_bindgen::{runtime, system};
 
 pub use self::{
     arbiter::{Arbiter, ArbiterHandle},
+    runtime::Runtime,
     system::{System, SystemRunner},
 };
-
-#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
-pub use runtime::Runtime;
-
-#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-pub use wb_runtime::Runtime;
 
 #[cfg(feature = "rt-tokio")]
 pub mod signal {

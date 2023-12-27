@@ -1,26 +1,16 @@
 /// 現状 actix_rt::System は wasm では使わない
 use std::future::Future;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::wasm_bindgen_test as test;
-use web_time::{Duration, Instant};
 
-use actix_rt::{Arbiter, System};
+use actix_rt::{
+    time::{sleep, Instant},
+    Arbiter, System,
+};
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-
-async fn sleep(time: Duration) -> () {
-    let (tx, rx) = oneshot::channel::<()>();
-    let f = Closure::once_into_js(move || tx.send(()).unwrap());
-    let _ = web_sys::window()
-        .unwrap()
-        .set_timeout_with_callback_and_timeout_and_arguments_0(
-            &JsCast::dyn_into::<web_sys::js_sys::Function>(f).unwrap(),
-            time.as_millis() as i32,
-        );
-
-    rx.await.unwrap();
-}
 
 async fn spawn_and_wait<F>(f: F)
 where

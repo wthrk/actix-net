@@ -93,9 +93,6 @@ pub use runtime::Runtime;
 #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
 pub use wb_runtime::Runtime;
 
-#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-use wb_runtime as runtime;
-
 #[cfg(feature = "rt-tokio")]
 pub mod signal {
     //! Asynchronous signal handling (Tokio re-exports).
@@ -189,15 +186,13 @@ pub mod time {
     };
 }
 
-//#[cfg(not(feature = "rt-tokio"))]
-//pub mod time {
-//    //! Utilities for tracking time (Tokio re-exports).
-//
-//    pub use instant::Instant;
-//    pub use wasmtimer::tokio::{
-//        interval, interval_at, sleep, sleep_until, timeout, Interval, Sleep, Timeout,
-//    };
-//}
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+pub mod time {
+    pub use wasmtimer::{
+        std::Instant,
+        tokio::{interval, interval_at, sleep, sleep_until, timeout, Interval, Sleep, Timeout},
+    };
+}
 
 #[cfg(feature = "rt-tokio")]
 pub mod task {

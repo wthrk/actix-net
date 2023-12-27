@@ -67,11 +67,11 @@ pub use actix_macros::test;
 
 pub use tokio::pin;
 
-#[cfg(feature = "rt-tokio")]
-use tokio::task::JoinHandle;
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
+pub use tokio::task::JoinHandle;
 
-#[cfg(not(feature = "rt-tokio"))]
-struct JoinHandle<T>(std::marker::PhantomData<T>);
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+pub struct JoinHandle<T>(std::marker::PhantomData<T>);
 
 mod arbiter;
 mod system;
@@ -233,7 +233,7 @@ pub mod task {
 /// ```
 #[track_caller]
 #[inline]
-#[cfg(feature = "rt-tokio")]
+#[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
 pub fn spawn<Fut>(f: Fut) -> JoinHandle<Fut::Output>
 where
     Fut: Future + 'static,
@@ -242,11 +242,15 @@ where
     tokio::task::spawn_local(f)
 }
 
-#[cfg(not(feature = "rt-tokio"))]
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
 pub fn spawn<Fut>(f: Fut) -> JoinHandle<Fut::Output>
 where
     Fut: Future + 'static,
     Fut::Output: 'static,
 {
-    unreachable!()
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = f.await;
+    });
+
+    JoinHandle(std::marker::PhantomData)
 }

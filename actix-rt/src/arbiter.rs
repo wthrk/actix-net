@@ -5,6 +5,7 @@ use std::{
     pin::Pin,
     sync::atomic::{AtomicUsize, Ordering},
     task::{Context, Poll},
+    time::Duration,
 };
 
 #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
@@ -13,7 +14,10 @@ use std::thread;
 use futures_core::ready;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::system::{System, SystemCommand};
+use crate::{
+    system::{System, SystemCommand},
+    time,
+};
 
 pub(crate) static COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -92,9 +96,6 @@ pub struct Arbiter {
 
     #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     thread_handle: thread::JoinHandle<()>,
-
-    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-    join_rx: oneshot::Receiver<()>,
 }
 
 impl Arbiter {
@@ -115,28 +116,21 @@ impl Arbiter {
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
     #[allow(clippy::new_without_default)]
     pub fn new() -> Arbiter {
-        if Self::try_current().is_some() {
-            panic!("Cannot create new Arbiter: Arbiter is already running.");
-        }
+        Self::drop_static();
 
         let arb_id = COUNT.fetch_add(1, Ordering::Relaxed);
         let name = format!("actix-rt|arbiter:{}", arb_id);
         let (tx, rx) = mpsc::unbounded_channel();
-        let (join_tx, join_rx) = oneshot::channel();
 
         let hnd = ArbiterHandle::new(tx.clone());
         HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
         System::construct(hnd.clone());
 
         // run arbiter event processing loop
-        let runner = ArbiterRunner {
-            rx,
-            join_tx: Some(join_tx),
-            arb_id,
-        };
+        let runner = ArbiterRunner { rx, arb_id };
         wasm_bindgen_futures::spawn_local(runner);
 
-        Arbiter { tx, join_rx }
+        Arbiter { tx }
     }
 
     /// Spawn a new Arbiter using the [Tokio Runtime](tokio-runtime) returned from a closure.
@@ -330,17 +324,30 @@ impl Arbiter {
     }
 
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-    pub async fn join_async(self) -> Result<(), oneshot::error::RecvError> {
-        self.join_rx.await
+    pub async fn join_async(self) -> Result<(), std::io::Error> {
+        while Self::try_current().is_some() {
+            time::sleep(Duration::ZERO).await;
+        }
+
+        Ok(())
+    }
+
+    fn drop_static() {
+        HANDLE.with(|cell| *cell.borrow_mut() = None);
+    }
+}
+
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+#[allow(clippy::new_without_default)]
+impl Drop for Arbiter {
+    fn drop(&mut self) {
+        Self::drop_static();
     }
 }
 
 /// A persistent future that processes [Arbiter] commands.
 struct ArbiterRunner {
     rx: mpsc::UnboundedReceiver<ArbiterCommand>,
-
-    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-    join_tx: Option<oneshot::Sender<()>>,
 
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
     arb_id: usize,
@@ -383,6 +390,7 @@ impl Future for ArbiterRunner {
                 // process arbiter command
                 Some(item) => match item {
                     ArbiterCommand::Stop => {
+                        Arbiter::drop_static();
                         break;
                     }
                     ArbiterCommand::Execute(task_fut) => {
@@ -390,13 +398,6 @@ impl Future for ArbiterRunner {
                     }
                 },
             }
-        }
-
-        if let Some(tx) = self.join_tx.take() {
-            wasm_bindgen_futures::spawn_local(async move {
-                HANDLE.with(|cell| *cell.borrow_mut() = None);
-                tx.send(()).unwrap();
-            });
         }
 
         Poll::Ready(())

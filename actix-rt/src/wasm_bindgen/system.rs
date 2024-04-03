@@ -115,7 +115,8 @@ impl SystemRunner {
     pub async fn block_on<F: Future>(&self, fut: F) -> F::Output {
         self.run();
         let result = fut.await;
-        // self.stop();
+        self.stop();
+        self.join().await;
         result
     }
 
@@ -127,9 +128,15 @@ impl SystemRunner {
         }
     }
 
-    fn stop(&self) {
+    pub fn stop(&self) {
         if let Some(arbiter) = self.0.borrow_mut().take() {
             arbiter.stop();
+        }
+    }
+
+    pub async fn join(&self) {
+        if let Some(arbiter) = self.0.borrow_mut().take() {
+            arbiter.join_async().await;
         }
     }
 }

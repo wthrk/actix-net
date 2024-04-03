@@ -88,10 +88,10 @@ async fn arbiter_spawn_fn_runs() {
 
     let num = rx.recv().await.unwrap();
 
-    assert_eq!(num, 42);
-
     arbiter.stop();
     arbiter.join_async().await.unwrap();
+
+    assert_eq!(num, 42);
 }
 
 #[test]
@@ -110,13 +110,16 @@ async fn system_block_on_arbiter_is_registered_with_spawn() {
     let system = System::new();
     system
         .block_on(async {
+            let (tx_fin, rx_fin) = oneshot::channel::<()>();
             actix_rt::spawn(async move {
-                if let Some(arbiter) = Arbiter::try_current() {
+                if Arbiter::try_current().is_some() {
                     tx.send(42).await.unwrap();
                 } else {
                     tx.send(0).await.unwrap();
                 }
+                tx_fin.send(()).unwrap();
             });
+            rx_fin.await.unwrap();
         })
         .await;
 

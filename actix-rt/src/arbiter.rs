@@ -96,6 +96,9 @@ pub struct Arbiter {
 
     #[cfg(all(feature = "rt-tokio", not(feature = "rt-wasm-bindgen")))]
     thread_handle: thread::JoinHandle<()>,
+
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    rx_join: Option<oneshot::Receiver<()>>,
 }
 
 impl Arbiter {
@@ -123,16 +126,24 @@ impl Arbiter {
         let arb_id = COUNT.fetch_add(1, Ordering::Relaxed);
         let name = format!("actix-rt|arbiter:{}", arb_id);
         let (tx, rx) = mpsc::unbounded_channel();
+        let (tx_join, rx_join) = oneshot::channel();
 
         let hnd = ArbiterHandle::new(tx.clone());
         HANDLE.with(|cell| *cell.borrow_mut() = Some(hnd.clone()));
         System::construct(hnd.clone());
 
         // run arbiter event processing loop
-        let runner = ArbiterRunner { rx, arb_id };
+        let runner = ArbiterRunner {
+            rx,
+            arb_id,
+            tx_join: Some(tx_join),
+        };
         wasm_bindgen_futures::spawn_local(runner);
 
-        Arbiter { tx }
+        Arbiter {
+            tx,
+            rx_join: Some(rx_join),
+        }
     }
 
     /// Spawn a new Arbiter using the [Tokio Runtime](tokio-runtime) returned from a closure.
@@ -326,12 +337,13 @@ impl Arbiter {
     }
 
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
-    pub async fn join_async(self) -> Result<(), std::io::Error> {
-        while Self::try_current().is_some() {
-            time::sleep(Duration::ZERO).await;
+    pub async fn join_async(mut self) -> Result<(), std::io::Error> {
+        if let Some(rx) = self.rx_join.take() {
+            rx.await
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Join error."))
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     fn drop_static() {
@@ -353,6 +365,18 @@ struct ArbiterRunner {
 
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
     arb_id: usize,
+
+    #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+    tx_join: Option<oneshot::Sender<()>>,
+}
+
+#[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
+impl ArbiterRunner {
+    fn complete(mut self: Pin<&mut Self>) {
+        if let Some(tx) = self.tx_join.take() {
+            let _ = tx.send(());
+        }
+    }
 }
 
 impl Future for ArbiterRunner {
@@ -387,12 +411,15 @@ impl Future for ArbiterRunner {
         loop {
             match ready!(self.rx.poll_recv(cx)) {
                 // channel closed; no more messages can be received
-                None => break,
+                None => {
+                    self.complete();
+                    break;
+                }
 
                 // process arbiter command
                 Some(item) => match item {
                     ArbiterCommand::Stop => {
-                        Arbiter::drop_static();
+                        self.complete();
                         break;
                     }
                     ArbiterCommand::Execute(task_fut) => {

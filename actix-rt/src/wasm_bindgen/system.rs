@@ -30,7 +30,7 @@ pub struct System {
 
 impl System {
     pub fn new() -> SystemRunner {
-        SystemRunner
+        SystemRunner::new()
     }
 
     /// Constructs new system and registers it on the current thread.
@@ -103,21 +103,33 @@ impl System {
     //}
 }
 
-pub struct SystemRunner;
+pub struct SystemRunner(RefCell<Option<Arbiter>>);
 pub struct SystemCommand;
 
 impl SystemRunner {
+    pub fn new() -> Self {
+        SystemRunner(RefCell::new(None))
+    }
+
     /// なんとなく他のと似た API にしてみる
     pub async fn block_on<F: Future>(&self, fut: F) -> F::Output {
         self.run();
         let result = fut.await;
+        self.stop();
         result
     }
 
     /// Run the system.
     pub fn run(&self) {
         if Arbiter::try_current().is_none() {
-            let _ = Arbiter::new();
+            let arbiter = Arbiter::new();
+            self.0.borrow_mut().replace(arbiter);
+        }
+    }
+
+    fn stop(&self) {
+        if let Some(arbiter) = self.0.borrow_mut().take() {
+            arbiter.stop();
         }
     }
 }

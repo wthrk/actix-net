@@ -116,7 +116,9 @@ impl Arbiter {
     #[cfg(all(feature = "rt-wasm-bindgen", not(feature = "rt-tokio")))]
     #[allow(clippy::new_without_default)]
     pub fn new() -> Arbiter {
-        Self::drop_static();
+        if (HANDLE.with(|cell| cell.borrow().is_some())) {
+            panic!("Arbiter is already running.");
+        }
 
         let arb_id = COUNT.fetch_add(1, Ordering::Relaxed);
         let name = format!("actix-rt|arbiter:{}", arb_id);

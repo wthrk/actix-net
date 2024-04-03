@@ -94,38 +94,33 @@ async fn arbiter_spawn_fn_runs() {
     arbiter.join_async().await.unwrap();
 }
 
-// シングルスレッドでの動作なので panic すると panic する
-// wasm_bindgen_futures::spawn_local は panic が起きるとリークするっぽい
-// 以下同様
-// see: https://rustwasm.github.io/wasm-bindgen/api/wasm_bindgen_futures/fn.future_to_promise.html#:~:text=or%20Err.-,Panics,-Note%20that%20in
 #[test]
-#[should_panic]
-#[ignore]
-async fn arbiter_drop_no_panic_fn() {
-    // let _ = System::new();
-
-    let arbiter = Arbiter::new();
-    arbiter.spawn_fn(|| panic!("test"));
-
-    arbiter.stop();
-    arbiter.join_async().await.unwrap();
+async fn system_block_on_arbiter_is_registered() {
+    let system = System::new();
+    system
+        .block_on(async {
+            assert!(Arbiter::try_current().is_some());
+        })
+        .await;
 }
 
 #[test]
-#[should_panic]
-#[ignore]
-fn no_system_current_panic() {
-    System::current();
-}
+async fn system_block_on_arbiter_is_registered_with_spawn() {
+    let (tx, mut rx) = mpsc::channel::<u32>(1);
+    let system = System::new();
+    system
+        .block_on(async {
+            actix_rt::spawn(async move {
+                if let Some(arbiter) = Arbiter::try_current() {
+                    tx.send(42).await.unwrap();
+                } else {
+                    tx.send(0).await.unwrap();
+                }
+            });
+        })
+        .await;
 
-#[test]
-#[ignore]
-fn no_system_arbiter_new_panic() {
-    Arbiter::new();
-}
+    let num = rx.recv().await.unwrap();
 
-#[test]
-#[ignore]
-fn try_current_no_system() {
-    assert!(System::try_current().is_none())
+    assert_eq!(num, 42);
 }

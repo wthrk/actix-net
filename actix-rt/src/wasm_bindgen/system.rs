@@ -115,7 +115,7 @@ impl SystemRunner {
     pub async fn block_on<F: Future>(&self, fut: F) -> F::Output {
         self.run();
         let result = fut.await;
-        self.stop();
+        // self.stop();
         result
     }
 

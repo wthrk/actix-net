@@ -120,6 +120,14 @@ impl SystemRunner {
         result
     }
 
+    /// system の停止を待つ
+    pub async fn wait_for<F: Future>(&self, fut: F) -> F::Output {
+        self.run();
+        let result = fut.await;
+        self.join().await;
+        result
+    }
+
     /// Run the system.
     pub fn run(&self) {
         if Arbiter::try_current().is_none() {
